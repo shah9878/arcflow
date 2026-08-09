@@ -8,6 +8,7 @@ import { useHealthFactor } from "@/hooks/useHealthFactor";
 import { useLendingMarket, MarketAsset } from "@/hooks/useLendingMarket";
 import { useLendingActions } from "@/hooks/useLendingActions";
 import { useTokenBalance } from "@/hooks/useTokenBalance";
+import { useRefreshLending } from "@/hooks/useRefreshLending";
 import { ARC_EXPLORER } from "@/lib/constants";
 
 function validateAmount(value: string): string {
@@ -22,9 +23,10 @@ type ToastMsg = { type: "pending" | "success" | "error"; message: string; txHash
 
 export default function LendPage() {
   const { isConnected, address } = useAccount();
-  const { healthFactor, totalCollateralUSD, totalDebtUSD, availableBorrowUSD, isLoading: hfLoading, refetch: refetchHF } = useHealthFactor();
-  const { markets, isLoading: marketLoading, refetch: refetchMarket } = useLendingMarket();
+  const { healthFactor, totalCollateralUSD, totalDebtUSD, availableBorrowUSD, isLoading: hfLoading } = useHealthFactor();
+  const { markets, isLoading: marketLoading } = useLendingMarket();
   const { supply, withdraw, borrow, repay, submitting, statusMessage } = useLendingActions();
+  const refreshLending = useRefreshLending();
 
   const [supplyModal, setSupplyModal] = useState<MarketAsset | null>(null);
   const [withdrawModal, setWithdrawModal] = useState<MarketAsset | null>(null);
@@ -40,7 +42,7 @@ export default function LendPage() {
   // User wallet balances for active modal tokens
   const activeTokenAddress = supplyModal?.token.address || repayModal?.token.address;
   const activeTokenSymbol = supplyModal?.token.symbol || repayModal?.token.symbol;
-  const { balance: walletBalance, refetch: refetchWalletBalance } = useTokenBalance(
+  const { balance: walletBalance } = useTokenBalance(
     activeTokenAddress,
     address,
     activeTokenSymbol
@@ -66,10 +68,8 @@ export default function LendPage() {
     if (msg.type !== "pending") setTimeout(() => setToast(null), 5000);
   };
 
-  const handleRefetchAll = () => {
-    refetchHF();
-    refetchMarket();
-    refetchWalletBalance();
+  const handleRefetchAll = async () => {
+    await refreshLending();
   };
 
   const handleSupplySubmit = async () => {
@@ -82,7 +82,7 @@ export default function LendPage() {
       showToast({ type: "success", message: `Supplied ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setSupplyModal(null);
       setSupplyAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",
@@ -101,7 +101,7 @@ export default function LendPage() {
       showToast({ type: "success", message: `Withdrew ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setWithdrawModal(null);
       setWithdrawAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",
@@ -120,7 +120,7 @@ export default function LendPage() {
       showToast({ type: "success", message: `Borrowed ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setBorrowModal(null);
       setBorrowAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",
@@ -139,7 +139,7 @@ export default function LendPage() {
       showToast({ type: "success", message: `Repaid ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setRepayModal(null);
       setRepayAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",

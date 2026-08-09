@@ -1,27 +1,39 @@
 "use client";
 
-import { useReadContract, useAccount } from "wagmi";
+import { useCallback } from "react";
+import { useAccount, useConfig } from "wagmi";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { readContract } from "wagmi/actions";
 import { formatUnits } from "viem";
 import { LENDING_POOL_ABI, LENDING_POOL_ADDRESS } from "@/lib/contracts";
+import { LENDING_ACCOUNT_QUERY_KEY } from "@/hooks/useLendingMarket";
 
 export function useHealthFactor() {
   const { address, isConnected } = useAccount();
+  const config = useConfig();
+  const queryClient = useQueryClient();
 
-  const { data, isLoading, error, refetch } = useReadContract({
-    address: LENDING_POOL_ADDRESS,
-    abi: LENDING_POOL_ABI,
-    functionName: "getUserAccountData",
-    args: address ? [address] : undefined,
-    query: {
-      enabled: !!address && isConnected,
-      refetchInterval: 10_000,
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    queryKey: [LENDING_ACCOUNT_QUERY_KEY, LENDING_POOL_ADDRESS, address ?? "none"],
+    enabled: !!address && isConnected,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 10_000,
+    queryFn: async () => {
+      if (!address) return null;
+      const result = (await readContract(config, {
+        address: LENDING_POOL_ADDRESS,
+        abi: LENDING_POOL_ABI,
+        functionName: "getUserAccountData",
+        args: [address],
+      })) as [bigint, bigint, bigint];
+      return result;
     },
   });
 
-  const result = data as [bigint, bigint, bigint] | undefined;
+  const result = data ?? undefined;
 
-  // Handles collateral & debt USD formatting
-  // The contract returns collateral and debt USD values based on oracle price
   const totalCollateralUSD = result ? parseFloat(formatUnits(result[0], 18)) : 0;
   const totalDebtUSD = result ? parseFloat(formatUnits(result[1], 18)) : 0;
 
@@ -40,13 +52,18 @@ export function useHealthFactor() {
   const maxBorrow = totalCollateralUSD * 0.8; // 80% liquidation threshold
   const availableBorrowUSD = Math.max(0, maxBorrow - totalDebtUSD);
 
+  const refetchAll = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: [LENDING_ACCOUNT_QUERY_KEY] });
+    return refetch();
+  }, [queryClient, refetch]);
+
   return {
     healthFactor,
     totalCollateralUSD,
     totalDebtUSD,
     availableBorrowUSD,
-    isLoading,
+    isLoading: isLoading || isFetching,
     error,
-    refetch,
+    refetch: refetchAll,
   };
 }

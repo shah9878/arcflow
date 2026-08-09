@@ -38,6 +38,8 @@ export function useTokenBalance(
     args: userAddress ? [userAddress] : undefined,
     query: {
       enabled: !!tokenAddress && !!userAddress,
+      staleTime: 0,
+      refetchOnMount: "always",
       refetchInterval: 10_000,
     },
   });
@@ -61,6 +63,8 @@ export function useNativeUsdcBalance(userAddress: `0x${string}` | undefined) {
     address: userAddress,
     query: {
       enabled: !!userAddress,
+      staleTime: 0,
+      refetchOnMount: "always",
       refetchInterval: 10_000,
     },
   });
@@ -92,6 +96,8 @@ export function useTokenBalanceWithDecimals(
     args: userAddress ? [userAddress] : undefined,
     query: {
       enabled: !!tokenAddress && !!userAddress,
+      staleTime: 0,
+      refetchOnMount: "always",
       refetchInterval: 10_000,
     },
   });

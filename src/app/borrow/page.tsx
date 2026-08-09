@@ -8,6 +8,7 @@ import { useHealthFactor } from "@/hooks/useHealthFactor";
 import { useLendingMarket, MarketAsset } from "@/hooks/useLendingMarket";
 import { useLendingActions } from "@/hooks/useLendingActions";
 import { useTokenBalance } from "@/hooks/useTokenBalance";
+import { useRefreshLending } from "@/hooks/useRefreshLending";
 import { ARC_EXPLORER } from "@/lib/constants";
 
 function validateAmount(value: string): string {
@@ -22,9 +23,10 @@ type ToastMsg = { type: "pending" | "success" | "error"; message: string; txHash
 
 export default function BorrowPage() {
   const { isConnected, address } = useAccount();
-  const { healthFactor, totalCollateralUSD, totalDebtUSD, availableBorrowUSD, isLoading: hfLoading, refetch: refetchHF } = useHealthFactor();
-  const { markets, isLoading: marketLoading, refetch: refetchMarket } = useLendingMarket();
+  const { healthFactor, totalCollateralUSD, totalDebtUSD, availableBorrowUSD, isLoading: hfLoading } = useHealthFactor();
+  const { markets, isLoading: marketLoading } = useLendingMarket();
   const { borrow, repay, submitting, statusMessage } = useLendingActions();
+  const refreshLending = useRefreshLending();
 
   const [borrowModal, setBorrowModal] = useState<MarketAsset | null>(null);
   const [repayModal, setRepayModal] = useState<MarketAsset | null>(null);
@@ -33,7 +35,7 @@ export default function BorrowPage() {
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
   // User wallet balance for token in repay modal
-  const { balance: walletBalance, refetch: refetchWalletBalance } = useTokenBalance(
+  const { balance: walletBalance } = useTokenBalance(
     repayModal?.token.address,
     address,
     repayModal?.token.symbol
@@ -59,10 +61,8 @@ export default function BorrowPage() {
     if (msg.type !== "pending") setTimeout(() => setToast(null), 5000);
   };
 
-  const handleRefetchAll = () => {
-    refetchHF();
-    refetchMarket();
-    refetchWalletBalance();
+  const handleRefetchAll = async () => {
+    await refreshLending();
   };
 
   const handleBorrowSubmit = async () => {
@@ -75,7 +75,7 @@ export default function BorrowPage() {
       showToast({ type: "success", message: `Borrowed ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setBorrowModal(null);
       setBorrowAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",
@@ -94,7 +94,7 @@ export default function BorrowPage() {
       showToast({ type: "success", message: `Repaid ${amt} ${asset.token.symbol} successfully!`, txHash: hash });
       setRepayModal(null);
       setRepayAmount("");
-      handleRefetchAll();
+      void handleRefetchAll();
     } catch (err: unknown) {
       showToast({
         type: "error",

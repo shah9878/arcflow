@@ -14,7 +14,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 1000 * 30,
+            // On-chain balances/markets should not stay sticky after txs
+            staleTime: 0,
             retry: 1,
           },
         },
