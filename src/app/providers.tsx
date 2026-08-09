@@ -14,8 +14,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            // On-chain balances/markets should not stay sticky after txs
-            staleTime: 0,
+            // Poll/refresh at most every 30s; tx success still force-refetches
+            staleTime: 30_000,
+            refetchOnWindowFocus: false,
             retry: 1,
           },
         },

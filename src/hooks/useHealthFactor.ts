@@ -2,32 +2,36 @@
 
 import { useCallback } from "react";
 import { useAccount, useConfig } from "wagmi";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { readContract } from "wagmi/actions";
 import { formatUnits } from "viem";
 import { LENDING_POOL_ABI, LENDING_POOL_ADDRESS } from "@/lib/contracts";
 import { LENDING_ACCOUNT_QUERY_KEY } from "@/hooks/useLendingMarket";
 
+type AccountTuple = [bigint, bigint, bigint];
+
 export function useHealthFactor() {
   const { address, isConnected } = useAccount();
   const config = useConfig();
-  const queryClient = useQueryClient();
 
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
+  const { data, isPending, isFetching, error, refetch } = useQuery({
     queryKey: [LENDING_ACCOUNT_QUERY_KEY, LENDING_POOL_ADDRESS, address ?? "none"],
     enabled: !!address && isConnected,
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    refetchInterval: 10_000,
-    queryFn: async () => {
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchInterval: 30_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
+    queryFn: async (): Promise<AccountTuple | null> => {
       if (!address) return null;
       const result = (await readContract(config, {
         address: LENDING_POOL_ADDRESS,
         abi: LENDING_POOL_ABI,
         functionName: "getUserAccountData",
         args: [address],
-      })) as [bigint, bigint, bigint];
+      })) as AccountTuple;
       return result;
     },
   });
@@ -53,16 +57,17 @@ export function useHealthFactor() {
   const availableBorrowUSD = Math.max(0, maxBorrow - totalDebtUSD);
 
   const refetchAll = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: [LENDING_ACCOUNT_QUERY_KEY] });
     return refetch();
-  }, [queryClient, refetch]);
+  }, [refetch]);
 
   return {
     healthFactor,
     totalCollateralUSD,
     totalDebtUSD,
     availableBorrowUSD,
-    isLoading: isLoading || isFetching,
+    // Initial load only — background poll must not swap numbers for skeletons
+    isLoading: isPending && !data,
+    isRefreshing: isFetching && !!data,
     error,
     refetch: refetchAll,
   };

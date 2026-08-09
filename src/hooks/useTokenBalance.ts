@@ -38,9 +38,11 @@ export function useTokenBalance(
     args: userAddress ? [userAddress] : undefined,
     query: {
       enabled: !!tokenAddress && !!userAddress,
-      staleTime: 0,
-      refetchOnMount: "always",
-      refetchInterval: 10_000,
+      staleTime: 30_000,
+      refetchInterval: 30_000,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      placeholderData: (prev) => prev,
     },
   });
 
@@ -63,9 +65,11 @@ export function useNativeUsdcBalance(userAddress: `0x${string}` | undefined) {
     address: userAddress,
     query: {
       enabled: !!userAddress,
-      staleTime: 0,
-      refetchOnMount: "always",
-      refetchInterval: 10_000,
+      staleTime: 30_000,
+      refetchInterval: 30_000,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      placeholderData: (prev) => prev,
     },
   });
 
@@ -96,9 +100,11 @@ export function useTokenBalanceWithDecimals(
     args: userAddress ? [userAddress] : undefined,
     query: {
       enabled: !!tokenAddress && !!userAddress,
-      staleTime: 0,
-      refetchOnMount: "always",
-      refetchInterval: 10_000,
+      staleTime: 30_000,
+      refetchInterval: 30_000,
+      refetchOnMount: false,
+      refetchOnWindowFocus: false,
+      placeholderData: (prev) => prev,
     },
   });
 

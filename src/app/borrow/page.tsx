@@ -24,7 +24,7 @@ type ToastMsg = { type: "pending" | "success" | "error"; message: string; txHash
 export default function BorrowPage() {
   const { isConnected, address } = useAccount();
   const { healthFactor, totalCollateralUSD, totalDebtUSD, availableBorrowUSD, isLoading: hfLoading } = useHealthFactor();
-  const { markets, isLoading: marketLoading } = useLendingMarket();
+  const { markets, isRefreshing: marketRefreshing } = useLendingMarket();
   const { borrow, repay, submitting, statusMessage } = useLendingActions();
   const refreshLending = useRefreshLending();
 
@@ -121,7 +121,7 @@ export default function BorrowPage() {
             onClick={handleRefetchAll}
             className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#13131a] border border-[#2a2a3a] text-gray-300 hover:text-white hover:border-blue-500/40 text-xs transition-colors"
           >
-            <RefreshCw size={14} className={marketLoading ? "animate-spin" : ""} />
+            <RefreshCw size={14} className={marketRefreshing ? "animate-spin" : ""} />
             Refresh
           </button>
         </div>

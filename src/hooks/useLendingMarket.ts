@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useAccount, useConfig } from "wagmi";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { readContracts } from "wagmi/actions";
 import { formatUnits } from "viem";
 import { LENDING_POOL_ABI, LENDING_POOL_ADDRESS } from "@/lib/contracts";
@@ -162,25 +162,30 @@ async function fetchMarkets(
 export function useLendingMarket() {
   const { address } = useAccount();
   const config = useConfig();
-  const queryClient = useQueryClient();
 
-  const { data, isLoading, isFetching, error, refetch } = useQuery({
+  const { data, isPending, isFetching, error, refetch } = useQuery({
     queryKey: [LENDING_MARKET_QUERY_KEY, LENDING_POOL_ADDRESS, address ?? "none"],
     queryFn: () => fetchMarkets(config, address),
-    staleTime: 0,
-    refetchOnMount: "always",
-    refetchOnWindowFocus: true,
-    refetchInterval: 10_000,
+    // Quiet polling: keep last good snapshot on screen (no skeleton flash)
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    refetchInterval: 30_000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
+    placeholderData: (prev) => prev,
   });
 
   const refetchAll = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: [LENDING_MARKET_QUERY_KEY] });
+    // Soft refetch — does not clear cached data (avoids flicker after tx)
     return refetch();
-  }, [queryClient, refetch]);
+  }, [refetch]);
 
   return {
     markets: data ?? [],
-    isLoading: isLoading || isFetching,
+    // Only true on first load with no cached data — never during background refresh
+    isLoading: isPending && !data,
+    isRefreshing: isFetching && !!data,
     error,
     refetch: refetchAll,
   };

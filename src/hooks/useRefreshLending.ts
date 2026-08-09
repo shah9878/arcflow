@@ -8,33 +8,43 @@ import {
 } from "@/hooks/useLendingMarket";
 
 /**
- * Force-refresh all lend/borrow UI data after a successful on-chain tx.
- * Invalidates market + account queries (and ERC-20 balance reads) so the
- * lend page updates immediately without a full page reload.
+ * Soft-refresh lend/borrow UI after a confirmed tx.
+ * Uses refetchQueries (keeps previous data painted) — never clears cache mid-flight,
+ * so the page does not flicker skeletons or zero values.
  */
 export function useRefreshLending() {
   const queryClient = useQueryClient();
 
   return useCallback(async () => {
-    // Brief delay so public RPC nodes catch up with the mined block
-    await new Promise((r) => setTimeout(r, 400));
+    // Short delay so public RPC has the mined block
+    await new Promise((r) => setTimeout(r, 500));
 
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: [LENDING_MARKET_QUERY_KEY] }),
-      queryClient.invalidateQueries({ queryKey: [LENDING_ACCOUNT_QUERY_KEY] }),
-      // wagmi v2 read hooks use these prefixes
-      queryClient.invalidateQueries({ queryKey: ["readContract"] }),
-      queryClient.invalidateQueries({ queryKey: ["readContracts"] }),
-      queryClient.invalidateQueries({ queryKey: ["balance"] }),
+      queryClient.refetchQueries({
+        queryKey: [LENDING_MARKET_QUERY_KEY],
+        type: "active",
+      }),
+      queryClient.refetchQueries({
+        queryKey: [LENDING_ACCOUNT_QUERY_KEY],
+        type: "active",
+      }),
+      queryClient.refetchQueries({ queryKey: ["readContract"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["balance"], type: "active" }),
     ]);
 
-    // Second pass shortly after for stubborn RPCs / multicall lag
-    await new Promise((r) => setTimeout(r, 1200));
+    // One follow-up for laggy RPCs — still soft (placeholderData stays)
+    await new Promise((r) => setTimeout(r, 1500));
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: [LENDING_MARKET_QUERY_KEY] }),
-      queryClient.invalidateQueries({ queryKey: [LENDING_ACCOUNT_QUERY_KEY] }),
-      queryClient.invalidateQueries({ queryKey: ["readContract"] }),
-      queryClient.invalidateQueries({ queryKey: ["balance"] }),
+      queryClient.refetchQueries({
+        queryKey: [LENDING_MARKET_QUERY_KEY],
+        type: "active",
+      }),
+      queryClient.refetchQueries({
+        queryKey: [LENDING_ACCOUNT_QUERY_KEY],
+        type: "active",
+      }),
+      queryClient.refetchQueries({ queryKey: ["readContract"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["balance"], type: "active" }),
     ]);
   }, [queryClient]);
 }
