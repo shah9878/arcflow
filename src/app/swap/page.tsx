@@ -7,6 +7,7 @@ import {
   AlertTriangle, CheckCircle, Loader2, ExternalLink, Zap,
 } from "lucide-react";
 import { TokenLogo } from "@/components/ui/TokenLogo";
+import { ConnectModal } from "@/components/wallet/ConnectModal";
 import { SWAPPABLE_TOKENS, Token } from "@/lib/tokenList";
 import { useSwapQuote } from "@/hooks/useSwapQuote";
 import { useArcNetwork } from "@/hooks/useArcNetwork";
@@ -89,6 +90,7 @@ export default function SwapPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [tokenSearch, setTokenSearch] = useState("");
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   // Arc AppKit estimateSwap — uses token symbols
   const { amountOut, priceImpact, minimumReceived, gasFee, loading: quoteLoading, error: quoteError } =
@@ -172,7 +174,14 @@ export default function SwapPage() {
   };
 
   const ctaButton = () => {
-    if (!isConnected) return { label: "Connect Wallet", action: () => {}, disabled: false, variant: "blue" };
+    if (!isConnected) {
+      return {
+        label: "Connect Wallet",
+        action: () => setConnectOpen(true),
+        disabled: false,
+        variant: "blue",
+      };
+    }
     if (!isCorrectNetwork) return { label: "Switch to Arc Testnet", action: switchToArc, disabled: false, variant: "red" };
     if (swapLoading) return { label: "Swapping...", action: () => {}, disabled: true, variant: "gray" };
     if (!amountIn || parseFloat(amountIn) === 0) return { label: "Enter an amount", action: () => {}, disabled: true, variant: "gray" };
@@ -591,6 +600,8 @@ export default function SwapPage() {
           </button>
         </div>
       )}
+
+      <ConnectModal isOpen={connectOpen} onClose={() => setConnectOpen(false)} />
     </div>
   );
 }
