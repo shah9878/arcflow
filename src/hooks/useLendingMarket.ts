@@ -29,6 +29,35 @@ function calculateApy(aprPercent: number): number {
   return Number(apy.toFixed(2));
 }
 
+/** Extract bigint from heterogeneous useReadContracts results (union includes address[]). */
+function asBigInt(result: unknown): bigint {
+  return typeof result === "bigint" ? result : BigInt(0);
+}
+
+type AssetStruct = readonly [
+  boolean,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+  bigint,
+];
+
+function asAssetStruct(result: unknown): AssetStruct | undefined {
+  if (!Array.isArray(result) || result.length < 6) return undefined;
+  if (typeof result[0] !== "boolean") return undefined;
+  if (
+    typeof result[1] !== "bigint" ||
+    typeof result[2] !== "bigint" ||
+    typeof result[3] !== "bigint" ||
+    typeof result[4] !== "bigint" ||
+    typeof result[5] !== "bigint"
+  ) {
+    return undefined;
+  }
+  return result as unknown as AssetStruct;
+}
+
 export function useLendingMarket() {
   const { address, isConnected } = useAccount();
 
@@ -37,32 +66,32 @@ export function useLendingMarket() {
     {
       address: LENDING_POOL_ADDRESS,
       abi: LENDING_POOL_ABI,
-      functionName: "assets",
-      args: [t.address],
+      functionName: "assets" as const,
+      args: [t.address] as const,
     },
     {
       address: LENDING_POOL_ADDRESS,
       abi: LENDING_POOL_ABI,
-      functionName: "getSupplyRate",
-      args: [t.address],
+      functionName: "getSupplyRate" as const,
+      args: [t.address] as const,
     },
     {
       address: LENDING_POOL_ADDRESS,
       abi: LENDING_POOL_ABI,
-      functionName: "getBorrowRate",
-      args: [t.address],
+      functionName: "getBorrowRate" as const,
+      args: [t.address] as const,
     },
     {
       address: LENDING_POOL_ADDRESS,
       abi: LENDING_POOL_ABI,
-      functionName: "supplyShares",
-      args: address ? [address, t.address] : undefined,
+      functionName: "supplyShares" as const,
+      args: address ? ([address, t.address] as const) : undefined,
     },
     {
       address: LENDING_POOL_ADDRESS,
       abi: LENDING_POOL_ABI,
-      functionName: "borrowShares",
-      args: address ? [address, t.address] : undefined,
+      functionName: "borrowShares" as const,
+      args: address ? ([address, t.address] as const) : undefined,
     },
   ]);
 
@@ -77,21 +106,21 @@ export function useLendingMarket() {
   // Second pass queries for supplySharesToAmount and borrowSharesToAmount
   const shareConversionContracts = TOKEN_LIST.flatMap((t, idx) => {
     const baseIdx = idx * 5;
-    const userSupplyShares = (data?.[baseIdx + 3]?.result as bigint) ?? BigInt(0);
-    const userBorrowShares = (data?.[baseIdx + 4]?.result as bigint) ?? BigInt(0);
+    const userSupplyShares = asBigInt(data?.[baseIdx + 3]?.result);
+    const userBorrowShares = asBigInt(data?.[baseIdx + 4]?.result);
 
     return [
       {
         address: LENDING_POOL_ADDRESS,
         abi: LENDING_POOL_ABI,
-        functionName: "supplySharesToAmount",
-        args: [t.address, userSupplyShares],
+        functionName: "supplySharesToAmount" as const,
+        args: [t.address, userSupplyShares] as const,
       },
       {
         address: LENDING_POOL_ADDRESS,
         abi: LENDING_POOL_ABI,
-        functionName: "borrowSharesToAmount",
-        args: [t.address, userBorrowShares],
+        functionName: "borrowSharesToAmount" as const,
+        args: [t.address, userBorrowShares] as const,
       },
     ];
   });
@@ -106,22 +135,28 @@ export function useLendingMarket() {
 
   const markets: MarketAsset[] = TOKEN_LIST.map((t, idx) => {
     const baseIdx = idx * 5;
-    const assetData = data?.[baseIdx]?.result as
-      | [boolean, bigint, bigint, bigint, bigint, bigint]
-      | undefined;
-    const supplyRateRaw = (data?.[baseIdx + 1]?.result as bigint) ?? BigInt(0);
-    const borrowRateRaw = (data?.[baseIdx + 2]?.result as bigint) ?? BigInt(0);
+    const assetData = asAssetStruct(data?.[baseIdx]?.result);
+    const supplyRateRaw = asBigInt(data?.[baseIdx + 1]?.result);
+    const borrowRateRaw = asBigInt(data?.[baseIdx + 2]?.result);
 
     const shareIdx = idx * 2;
-    const userSupplyAmount = (shareData?.[shareIdx]?.result as bigint) ?? BigInt(0);
-    const userBorrowAmount = (shareData?.[shareIdx + 1]?.result as bigint) ?? BigInt(0);
+    const userSupplyAmount = asBigInt(shareData?.[shareIdx]?.result);
+    const userBorrowAmount = asBigInt(shareData?.[shareIdx + 1]?.result);
 
-    const isSupported = assetData ? assetData[0] : true;
+    // Default unsupported when pool missing / call failed (do not fake markets)
+    const isSupported = assetData ? assetData[0] : false;
     const totalSupplied = assetData ? assetData[1] : BigInt(0);
     const totalBorrowed = assetData ? assetData[2] : BigInt(0);
+    // assets[4]=baseRate, assets[5]=rateMultiplier — used if rate calls empty
+    const baseRateFromAsset = assetData ? assetData[4] : BigInt(0);
 
-    const supplyAprPercent = parseFloat(formatUnits(supplyRateRaw, 18)) * 100;
-    const borrowAprPercent = parseFloat(formatUnits(borrowRateRaw, 18)) * 100;
+    // Rates are 18-dec fractions (0.02e18 = 2%). Prefer live getSupplyRate / getBorrowRate.
+    const supplyRate = supplyRateRaw > BigInt(0) ? supplyRateRaw : BigInt(0);
+    const borrowRate =
+      borrowRateRaw > BigInt(0) ? borrowRateRaw : isSupported ? baseRateFromAsset : BigInt(0);
+
+    const supplyAprPercent = parseFloat(formatUnits(supplyRate, 18)) * 100;
+    const borrowAprPercent = parseFloat(formatUnits(borrowRate, 18)) * 100;
 
     const supplyApy = calculateApy(supplyAprPercent);
     const borrowApy = calculateApy(borrowAprPercent);

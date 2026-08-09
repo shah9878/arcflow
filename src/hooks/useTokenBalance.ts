@@ -2,29 +2,22 @@
 
 import { useReadContract, useBalance } from "wagmi";
 import { formatUnits } from "viem";
-import { ERC20_ABI } from "@/lib/contracts";
+import { ARC_USDC_ADDRESS, ERC20_ABI } from "@/lib/contracts";
 import { getTokenByAddress, getTokenBySymbol } from "@/lib/tokenList";
 
-const USDC_ADDRESS = "0x3600000000000000000000000000000000000000";
-const EURC_ADDRESS = "0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a";
-
-function isUsdcToken(tokenAddress?: string, tokenSymbol?: string): boolean {
-  return (
-    tokenSymbol?.toUpperCase() === "USDC" ||
-    tokenAddress?.toLowerCase() === USDC_ADDRESS.toLowerCase()
-  );
-}
-
-function isEurcToken(tokenAddress?: string, tokenSymbol?: string): boolean {
-  return (
-    tokenSymbol?.toUpperCase() === "EURC" ||
-    tokenAddress?.toLowerCase() === EURC_ADDRESS.toLowerCase()
-  );
-}
+/**
+ * Arc USDC: ERC-20 at 0x3600… uses 6 decimals (approve / transferFrom / balanceOf).
+ * Native eth_getBalance uses 18-dec view of the same balance — do not mix with supply amounts.
+ * Lending supply always uses ERC-20 6-dec units, so wallet balance here uses balanceOf.
+ */
 
 function getTokenDecimals(tokenAddress?: string, tokenSymbol?: string): number {
-  if (isUsdcToken(tokenAddress, tokenSymbol)) return 6;
-  if (isEurcToken(tokenAddress, tokenSymbol)) return 6;
+  if (
+    tokenSymbol?.toUpperCase() === "USDC" ||
+    tokenAddress?.toLowerCase() === ARC_USDC_ADDRESS.toLowerCase()
+  ) {
+    return 6;
+  }
   const token =
     (tokenAddress ? getTokenByAddress(tokenAddress) : undefined) ||
     (tokenSymbol ? getTokenBySymbol(tokenSymbol) : undefined);
@@ -36,36 +29,45 @@ export function useTokenBalance(
   userAddress: `0x${string}` | undefined,
   tokenSymbol?: string
 ) {
-  const isUsdc = isUsdcToken(tokenAddress, tokenSymbol);
   const decimals = getTokenDecimals(tokenAddress, tokenSymbol);
 
-  // For non-USDC ERC-20 tokens (e.g. EURC): use balanceOf
-  const { data: readData, isLoading: readIsLoading, error: readError, refetch: readRefetch } = useReadContract({
+  const { data: readData, isLoading, error, refetch } = useReadContract({
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "balanceOf",
     args: userAddress ? [userAddress] : undefined,
     query: {
-      enabled: !isUsdc && !!tokenAddress && !!userAddress,
+      enabled: !!tokenAddress && !!userAddress,
+      refetchInterval: 10_000,
     },
   });
 
-  // For USDC (native gas token on Arc Testnet): use useBalance with address only
-  const { data: balanceData, isLoading: balanceIsLoading, error: balanceError, refetch: balanceRefetch } = useBalance({
+  const data = readData as bigint | undefined;
+  const formatted = data !== undefined ? formatUnits(data, decimals) : "0.00";
+  const displayBalance = parseFloat(formatted).toFixed(4);
+
+  return {
+    balance: displayBalance,
+    rawBalance: data,
+    isLoading,
+    error,
+    refetch,
+  };
+}
+
+/** Navbar chip: native USDC gas balance (18-dec). Same funds as ERC-20 balanceOf (6-dec). */
+export function useNativeUsdcBalance(userAddress: `0x${string}` | undefined) {
+  const { data: balanceData, isLoading, error, refetch } = useBalance({
     address: userAddress,
     query: {
-      enabled: isUsdc && !!userAddress,
+      enabled: !!userAddress,
+      refetchInterval: 10_000,
     },
   });
 
-  const data = isUsdc ? balanceData?.value : (readData as bigint | undefined);
-  const isLoading = isUsdc ? balanceIsLoading : readIsLoading;
-  const error = isUsdc ? balanceError : readError;
-  const refetch = isUsdc ? balanceRefetch : readRefetch;
-
-  const formatted = isUsdc
-    ? (data !== undefined ? formatUnits(data as bigint, 18) : "0.00")
-    : (data !== undefined ? formatUnits(data as bigint, decimals) : "0.00");
+  const data = balanceData?.value;
+  // Arc native USDC uses 18 decimals of precision for eth_getBalance
+  const formatted = data !== undefined ? formatUnits(data, 18) : "0.00";
   const displayBalance = parseFloat(formatted).toFixed(4);
 
   return {
@@ -81,36 +83,21 @@ export function useTokenBalanceWithDecimals(
   tokenAddress: `0x${string}` | undefined,
   userAddress: `0x${string}` | undefined,
   decimals: number,
-  tokenSymbol?: string
+  _tokenSymbol?: string
 ) {
-  const isUsdc = isUsdcToken(tokenAddress, tokenSymbol);
-
-  const { data: readData, isLoading: readIsLoading, error: readError, refetch: readRefetch } = useReadContract({
+  const { data: readData, isLoading, error, refetch } = useReadContract({
     address: tokenAddress,
     abi: ERC20_ABI,
     functionName: "balanceOf",
     args: userAddress ? [userAddress] : undefined,
     query: {
-      enabled: !isUsdc && !!tokenAddress && !!userAddress,
+      enabled: !!tokenAddress && !!userAddress,
+      refetchInterval: 10_000,
     },
   });
 
-  // For USDC (native gas token on Arc Testnet): use useBalance with address only
-  const { data: balanceData, isLoading: balanceIsLoading, error: balanceError, refetch: balanceRefetch } = useBalance({
-    address: userAddress,
-    query: {
-      enabled: isUsdc && !!userAddress,
-    },
-  });
-
-  const data = isUsdc ? balanceData?.value : (readData as bigint | undefined);
-  const isLoading = isUsdc ? balanceIsLoading : readIsLoading;
-  const error = isUsdc ? balanceError : readError;
-  const refetch = isUsdc ? balanceRefetch : readRefetch;
-
-  const formatted = isUsdc
-    ? (data !== undefined ? formatUnits(data as bigint, 18) : "0.00")
-    : (data !== undefined ? formatUnits(data as bigint, decimals) : "0.00");
+  const data = readData as bigint | undefined;
+  const formatted = data !== undefined ? formatUnits(data, decimals) : "0.00";
   const displayBalance = parseFloat(formatted).toFixed(4);
 
   return {

@@ -1,6 +1,60 @@
-export const SWAP_ROUTER_ADDRESS = "0xc170E80c281f53446429e9dE2b33BFEcFdaaDd5B" as `0x${string}`;
-export const LENDING_POOL_ADDRESS = "0x20262821B19ADf7BC1f61bEd48f5D254898E42B4" as `0x${string}`;
-export const PRICE_ORACLE_ADDRESS = "0x04e345dA16D53933874038bEF497700511F98123" as `0x${string}`;
+/**
+ * ArcFlow contract config — paste addresses here after you deploy.
+ *
+ * Deploy order (Remix / Foundry / Hardhat — your choice):
+ *  1. ArcFlowPriceOracle
+ *  2. Oracle.setPrices([...tokens], [...prices])  // 1e18 = $1 per whole token
+ *  3. ArcFlowLendingPool(oracleAddress)
+ *  4. Pool.addSupportedAssets(tokens, baseRates, rateMultipliers)
+ *  5. Replace the three addresses below
+ *
+ * Arc Testnet market tokens (ERC-20 amounts use token decimals):
+ *  USDC   0x3600000000000000000000000000000000000000  (6 dec ERC-20; native gas is 18-dec view of same balance)
+ *  EURC   0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a  (6 dec)
+ *  cirBTC 0xf0C4a4CE82A5746AbAAd9425360Ab04fbBA432BF  (8 dec)
+ *
+ * Oracle prices (USD per whole token, 1e18 = $1):
+ *  USDC   = $1     → 1000000000000000000
+ *  EURC   = $1.25  → 1250000000000000000
+ *  cirBTC = $65000 → 65000000000000000000000
+ *
+ * setPrices tokens[] (same order as TOKEN_LIST):
+ *  [USDC, EURC, cirBTC]
+ * setPrices priceValues[]:
+ *  [1000000000000000000, 1250000000000000000, 65000000000000000000000]
+ *
+ * Suggested rates (18-dec APR fraction; frontend shows apr% = rate/1e18 * 100):
+ *  baseRate       20000000000000000   // 2%
+ *  rateMultiplier 100000000000000000  // +10% at 100% util
+ */
+
+/** Oracle USD prices scaled by 1e18 — use when calling setPrice / setPrices after deploy */
+export const ORACLE_PRICES = {
+  USDC: 1_000_000_000_000_000_000n, // $1
+  EURC: 1_250_000_000_000_000_000n, // $1.25
+  cirBTC: 65_000_000_000_000_000_000_000n, // $65,000
+} as const;
+
+// ─── Paste deployed addresses ───────────────────────────────────────────────
+export const SWAP_ROUTER_ADDRESS =
+  "0xc170E80c281f53446429e9dE2b33BFEcFdaaDd5B" as `0x${string}`;
+
+/** ArcFlowLendingPool — must have contract code on Arc testnet */
+export const LENDING_POOL_ADDRESS =
+  "0x20262821B19ADf7BC1f61bEd48f5D254898E42B4" as `0x${string}`;
+
+/** ArcFlowPriceOracle */
+export const PRICE_ORACLE_ADDRESS =
+  "0x04e345dA16D53933874038bEF497700511F98123" as `0x${string}`;
+
+// ─── Arc native USDC (ERC-20 interface) ─────────────────────────────────────
+export const ARC_USDC_ADDRESS =
+  "0x3600000000000000000000000000000000000000" as `0x${string}`;
+
+/** True when address is zero / empty placeholder */
+export function isConfiguredAddress(addr: `0x${string}` | string): boolean {
+  return !!addr && addr !== "0x0000000000000000000000000000000000000000";
+}
 
 export const SWAP_ROUTER_ABI = [
   {
@@ -12,10 +66,10 @@ export const SWAP_ROUTER_ABI = [
       { name: "amountOutMin", type: "uint256" },
       { name: "path", type: "address[]" },
       { name: "to", type: "address" },
-      { name: "deadline", type: "uint256" }
+      { name: "deadline", type: "uint256" },
     ],
-    outputs: [{ name: "amounts", type: "uint256[]" }]
-  }
+    outputs: [{ name: "amounts", type: "uint256[]" }],
+  },
 ] as const;
 
 export const ERC20_ABI = [
@@ -46,8 +100,53 @@ export const ERC20_ABI = [
     ],
     outputs: [{ name: "", type: "uint256" }],
   },
+  {
+    name: "decimals",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
 ] as const;
 
+export const PRICE_ORACLE_ABI = [
+  {
+    name: "getPrice",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "tryGetPrice",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "token", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    name: "setPrice",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "price", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "setPrices",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "tokens", type: "address[]" },
+      { name: "priceValues", type: "uint256[]" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** Matches ArcFlowLendingPool public surface used by the app */
 export const LENDING_POOL_ABI = [
   {
     name: "getSupportedAssets",
@@ -136,6 +235,13 @@ export const LENDING_POOL_ABI = [
     outputs: [{ name: "", type: "uint256" }],
   },
   {
+    name: "oracle",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
     name: "supply",
     type: "function",
     stateMutability: "nonpayable",
@@ -172,6 +278,28 @@ export const LENDING_POOL_ABI = [
     inputs: [
       { name: "token", type: "address" },
       { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "addSupportedAsset",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "token", type: "address" },
+      { name: "baseRate", type: "uint256" },
+      { name: "rateMultiplier", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "addSupportedAssets",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "tokens", type: "address[]" },
+      { name: "baseRates", type: "uint256[]" },
+      { name: "rateMultipliers", type: "uint256[]" },
     ],
     outputs: [],
   },

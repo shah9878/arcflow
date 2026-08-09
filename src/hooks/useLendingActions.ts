@@ -2,10 +2,35 @@
 
 import { useState } from "react";
 import { useAccount, useConfig } from "wagmi";
-import { writeContract, waitForTransactionReceipt, readContract } from "wagmi/actions";
+import {
+  writeContract,
+  waitForTransactionReceipt,
+  readContract,
+  getBytecode,
+} from "wagmi/actions";
 import { parseUnits } from "viem";
 import { LENDING_POOL_ABI, LENDING_POOL_ADDRESS, ERC20_ABI } from "@/lib/contracts";
 import { useTxStore } from "@/lib/txStore";
+
+async function assertPoolDeployed(config: Parameters<typeof getBytecode>[0]) {
+  const code = await getBytecode(config, { address: LENDING_POOL_ADDRESS });
+  if (!code || code === "0x") {
+    throw new Error(
+      `Lending pool is not deployed at ${LENDING_POOL_ADDRESS}. Deploy ArcFlowLendingPool, list assets, then paste the address in src/lib/contracts.ts.`
+    );
+  }
+}
+
+async function waitSuccess(
+  config: Parameters<typeof waitForTransactionReceipt>[0],
+  hash: `0x${string}`
+) {
+  const receipt = await waitForTransactionReceipt(config, { hash });
+  if (receipt.status !== "success") {
+    throw new Error("Transaction reverted on-chain");
+  }
+  return receipt;
+}
 
 export function useLendingActions() {
   const { address } = useAccount();
@@ -23,9 +48,21 @@ export function useLendingActions() {
     if (!address) throw new Error("Wallet not connected");
     setSubmitting(true);
     try {
+      await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
+      if (parsedAmount <= BigInt(0)) throw new Error("Invalid amount");
 
-      // 1. Check current allowance
+      setStatusMessage(`Checking ${symbol} balance...`);
+      const walletBal = (await readContract(config, {
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [address],
+      })) as bigint;
+      if (walletBal < parsedAmount) {
+        throw new Error(`Insufficient ${symbol} balance (ERC-20 view)`);
+      }
+
       setStatusMessage(`Checking ${symbol} allowance...`);
       const currentAllowance = (await readContract(config, {
         address: tokenAddress,
@@ -34,7 +71,6 @@ export function useLendingActions() {
         args: [address, LENDING_POOL_ADDRESS],
       })) as bigint;
 
-      // 2. Approve if allowance is insufficient
       if (currentAllowance < parsedAmount) {
         setStatusMessage(`Approving ${symbol} for Lending Pool...`);
         const approveTx = await writeContract(config, {
@@ -43,10 +79,9 @@ export function useLendingActions() {
           functionName: "approve",
           args: [LENDING_POOL_ADDRESS, parsedAmount],
         });
-        await waitForTransactionReceipt(config, { hash: approveTx });
+        await waitSuccess(config, approveTx);
       }
 
-      // 3. Call supply
       setStatusMessage(`Supplying ${amountStr} ${symbol}...`);
       const supplyTx = await writeContract(config, {
         address: LENDING_POOL_ADDRESS,
@@ -54,7 +89,7 @@ export function useLendingActions() {
         functionName: "supply",
         args: [tokenAddress, parsedAmount],
       });
-      await waitForTransactionReceipt(config, { hash: supplyTx });
+      await waitSuccess(config, supplyTx);
 
       addTransaction({
         type: "supply",
@@ -88,6 +123,7 @@ export function useLendingActions() {
     if (!address) throw new Error("Wallet not connected");
     setSubmitting(true);
     try {
+      await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
 
       setStatusMessage(`Withdrawing ${amountStr} ${symbol}...`);
@@ -97,7 +133,7 @@ export function useLendingActions() {
         functionName: "withdraw",
         args: [tokenAddress, parsedAmount],
       });
-      await waitForTransactionReceipt(config, { hash: withdrawTx });
+      await waitSuccess(config, withdrawTx);
 
       addTransaction({
         type: "withdraw",
@@ -131,6 +167,7 @@ export function useLendingActions() {
     if (!address) throw new Error("Wallet not connected");
     setSubmitting(true);
     try {
+      await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
 
       setStatusMessage(`Borrowing ${amountStr} ${symbol}...`);
@@ -140,7 +177,7 @@ export function useLendingActions() {
         functionName: "borrow",
         args: [tokenAddress, parsedAmount],
       });
-      await waitForTransactionReceipt(config, { hash: borrowTx });
+      await waitSuccess(config, borrowTx);
 
       addTransaction({
         type: "borrow",
@@ -174,9 +211,9 @@ export function useLendingActions() {
     if (!address) throw new Error("Wallet not connected");
     setSubmitting(true);
     try {
+      await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
 
-      // 1. Check allowance
       setStatusMessage(`Checking ${symbol} allowance...`);
       const currentAllowance = (await readContract(config, {
         address: tokenAddress,
@@ -185,7 +222,6 @@ export function useLendingActions() {
         args: [address, LENDING_POOL_ADDRESS],
       })) as bigint;
 
-      // 2. Approve if allowance is insufficient
       if (currentAllowance < parsedAmount) {
         setStatusMessage(`Approving ${symbol} for Repayment...`);
         const approveTx = await writeContract(config, {
@@ -194,10 +230,9 @@ export function useLendingActions() {
           functionName: "approve",
           args: [LENDING_POOL_ADDRESS, parsedAmount],
         });
-        await waitForTransactionReceipt(config, { hash: approveTx });
+        await waitSuccess(config, approveTx);
       }
 
-      // 3. Call repay
       setStatusMessage(`Repaying ${amountStr} ${symbol}...`);
       const repayTx = await writeContract(config, {
         address: LENDING_POOL_ADDRESS,
@@ -205,7 +240,7 @@ export function useLendingActions() {
         functionName: "repay",
         args: [tokenAddress, parsedAmount],
       });
-      await waitForTransactionReceipt(config, { hash: repayTx });
+      await waitSuccess(config, repayTx);
 
       addTransaction({
         type: "repay",

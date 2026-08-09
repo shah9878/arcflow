@@ -19,8 +19,9 @@ if (typeof window !== "undefined") {
 export const arcTestnet = defineChain({
   id: 5042002,
   name: "Arc Testnet",
+  // Arc native USDC gas uses 18-dec precision; ERC-20 interface at 0x3600… uses 6-dec
   nativeCurrency: {
-    decimals: 6,
+    decimals: 18,
     name: "USD Coin",
     symbol: "USDC",
   },

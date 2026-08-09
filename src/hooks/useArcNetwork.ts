@@ -12,8 +12,9 @@ const ARC_CHAIN_PARAMS = {
   rpcUrls: ["https://rpc.testnet.arc.network"],
   nativeCurrency: {
     name: "USD Coin",
+    // Arc native gas: 18-dec eth_getBalance; ERC-20 USDC interface: 6-dec
     symbol: "USDC",
-    decimals: 6,
+    decimals: 18,
   },
   blockExplorerUrls: ["https://testnet.arcscan.app"],
 };
