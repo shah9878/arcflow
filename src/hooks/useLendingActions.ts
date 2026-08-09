@@ -10,6 +10,7 @@ import {
 } from "wagmi/actions";
 import { parseUnits } from "viem";
 import { LENDING_POOL_ABI, LENDING_POOL_ADDRESS, ERC20_ABI } from "@/lib/contracts";
+import { friendlyLendingError } from "@/lib/lendingMath";
 import { useTxStore } from "@/lib/txStore";
 
 async function assertPoolDeployed(config: Parameters<typeof getBytecode>[0]) {
@@ -107,7 +108,7 @@ export function useLendingActions() {
         token: symbol,
         status: "failed",
       });
-      throw err;
+      throw new Error(friendlyLendingError(err));
     } finally {
       setSubmitting(false);
       setStatusMessage("");
@@ -125,6 +126,7 @@ export function useLendingActions() {
     try {
       await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
+      if (parsedAmount <= BigInt(0)) throw new Error("Invalid amount");
 
       setStatusMessage(`Withdrawing ${amountStr} ${symbol}...`);
       const withdrawTx = await writeContract(config, {
@@ -151,7 +153,7 @@ export function useLendingActions() {
         token: symbol,
         status: "failed",
       });
-      throw err;
+      throw new Error(friendlyLendingError(err));
     } finally {
       setSubmitting(false);
       setStatusMessage("");
@@ -169,6 +171,7 @@ export function useLendingActions() {
     try {
       await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
+      if (parsedAmount <= BigInt(0)) throw new Error("Invalid amount");
 
       setStatusMessage(`Borrowing ${amountStr} ${symbol}...`);
       const borrowTx = await writeContract(config, {
@@ -195,7 +198,7 @@ export function useLendingActions() {
         token: symbol,
         status: "failed",
       });
-      throw err;
+      throw new Error(friendlyLendingError(err));
     } finally {
       setSubmitting(false);
       setStatusMessage("");
@@ -213,6 +216,7 @@ export function useLendingActions() {
     try {
       await assertPoolDeployed(config);
       const parsedAmount = parseUnits(amountStr, decimals);
+      if (parsedAmount <= BigInt(0)) throw new Error("Invalid amount");
 
       setStatusMessage(`Checking ${symbol} allowance...`);
       const currentAllowance = (await readContract(config, {
@@ -258,7 +262,7 @@ export function useLendingActions() {
         token: symbol,
         status: "failed",
       });
-      throw err;
+      throw new Error(friendlyLendingError(err));
     } finally {
       setSubmitting(false);
       setStatusMessage("");

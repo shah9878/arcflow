@@ -10,12 +10,18 @@ import { useLendingActions } from "@/hooks/useLendingActions";
 import { useTokenBalance } from "@/hooks/useTokenBalance";
 import { useRefreshLending } from "@/hooks/useRefreshLending";
 import { ARC_EXPLORER } from "@/lib/constants";
+import {
+  getMaxWithdrawable,
+  previewHealthFactorAfterWithdraw,
+} from "@/lib/lendingMath";
 
-function validateAmount(value: string): string {
+function validateAmount(value: string, maxDecimals = 6): string {
   const cleaned = value.replace(/[^0-9.]/g, "");
   const parts = cleaned.split(".");
   if (parts.length > 2) return parts[0] + "." + parts[1];
-  if (parts[1] && parts[1].length > 6) return parts[0] + "." + parts[1].slice(0, 6);
+  if (parts[1] && parts[1].length > maxDecimals) {
+    return parts[0] + "." + parts[1].slice(0, maxDecimals);
+  }
   return cleaned;
 }
 
@@ -63,6 +69,39 @@ export default function LendPage() {
     return res > 100 ? null : res;
   }, [borrowAmount, borrowModal, healthFactor, totalCollateralUSD, totalDebtUSD]);
 
+  /** Safe max withdraw for open modal (HF-aware, not raw supply) */
+  const maxWithdraw = useMemo(() => {
+    if (!withdrawModal) {
+      return { maxAmount: "0", maxRaw: BigInt(0), limitedByDebt: false };
+    }
+    return getMaxWithdrawable(
+      withdrawModal.token,
+      withdrawModal.userSupplyAmount,
+      totalCollateralUSD,
+      totalDebtUSD
+    );
+  }, [withdrawModal, totalCollateralUSD, totalDebtUSD]);
+
+  const withdrawPreviewHF = useMemo(() => {
+    if (!withdrawModal || !withdrawAmount) return healthFactor;
+    const amt = parseFloat(withdrawAmount) || 0;
+    if (!amt) return healthFactor;
+    return previewHealthFactorAfterWithdraw(
+      totalCollateralUSD,
+      totalDebtUSD,
+      withdrawModal.token.symbol,
+      amt
+    );
+  }, [withdrawModal, withdrawAmount, healthFactor, totalCollateralUSD, totalDebtUSD]);
+
+  const withdrawUnsafe =
+    !!withdrawModal &&
+    !!withdrawAmount &&
+    parseFloat(withdrawAmount) > 0 &&
+    totalDebtUSD > 0 &&
+    withdrawPreviewHF !== null &&
+    withdrawPreviewHF < 1.0;
+
   const showToast = (msg: ToastMsg) => {
     setToast(msg);
     if (msg.type !== "pending") setTimeout(() => setToast(null), 5000);
@@ -94,7 +133,33 @@ export default function LendPage() {
   const handleWithdrawSubmit = async () => {
     if (!withdrawModal || !withdrawAmount || parseFloat(withdrawAmount) === 0) return;
     const asset = withdrawModal;
-    const amt = withdrawAmount;
+    let amt = withdrawAmount;
+
+    // Cap to HF-safe max so we never send a doomed tx
+    const safe = getMaxWithdrawable(
+      asset.token,
+      asset.userSupplyAmount,
+      totalCollateralUSD,
+      totalDebtUSD
+    );
+    if (parseFloat(amt) > parseFloat(safe.maxAmount) + 1e-12) {
+      if (parseFloat(safe.maxAmount) <= 0) {
+        showToast({
+          type: "error",
+          message:
+            "Cannot withdraw while this would drop health factor below 1.0. Repay debt first, then withdraw.",
+        });
+        return;
+      }
+      amt = safe.maxAmount;
+      setWithdrawAmount(amt);
+      showToast({
+        type: "error",
+        message: `Amount reduced to safe max ${amt} ${asset.token.symbol} (keeps HF ≥ 1.0). Review and confirm again.`,
+      });
+      return;
+    }
+
     try {
       showToast({ type: "pending", message: `Withdrawing ${amt} ${asset.token.symbol}...` });
       const hash = await withdraw(asset.token.address, amt, asset.token.decimals, asset.token.symbol);
@@ -389,12 +454,12 @@ export default function LendPage() {
                 <label className="text-sm text-gray-400 font-medium">Amount</label>
                 <div className="flex items-center gap-2 text-xs">
                   <span className="text-gray-400">
-                    Supplied: {withdrawModal.userSupplyFormatted} {withdrawModal.token.symbol}
+                    Safe max: {maxWithdraw.maxAmount} {withdrawModal.token.symbol}
                   </span>
-                  {parseFloat(withdrawModal.userSupplyFormatted) > 0 && (
+                  {parseFloat(maxWithdraw.maxAmount) > 0 && (
                     <button
                       type="button"
-                      onClick={() => setWithdrawAmount(withdrawModal.userSupplyFormatted)}
+                      onClick={() => setWithdrawAmount(maxWithdraw.maxAmount)}
                       className="text-blue-400 font-semibold hover:text-blue-300 transition-colors"
                     >
                       MAX
@@ -409,16 +474,73 @@ export default function LendPage() {
                   inputMode="decimal"
                   placeholder="0.0"
                   value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(validateAmount(e.target.value))}
+                  onChange={(e) =>
+                    setWithdrawAmount(
+                      validateAmount(e.target.value, withdrawModal.token.decimals)
+                    )
+                  }
                   className="flex-1 bg-transparent text-white text-lg font-semibold outline-none"
                   autoFocus
                 />
                 <span className="text-gray-400 text-sm">{withdrawModal.token.symbol}</span>
               </div>
             </div>
+            <div className="rounded-xl p-3 border border-[#2a2a3a] space-y-2 mb-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Supplied</span>
+                <span className="text-gray-300">
+                  {withdrawModal.userSupplyFormatted} {withdrawModal.token.symbol}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500">Your debt</span>
+                <span className="text-gray-300">${totalDebtUSD.toFixed(4)}</span>
+              </div>
+              {withdrawAmount && parseFloat(withdrawAmount) > 0 && (
+                <div className="flex justify-between text-sm border-t border-[#2a2a3a] pt-2">
+                  <span className="text-gray-500">New Health Factor</span>
+                  <span className={hfColor(withdrawPreviewHF)}>
+                    {withdrawPreviewHF !== null && withdrawPreviewHF <= 100
+                      ? withdrawPreviewHF.toFixed(2)
+                      : "—"}
+                  </span>
+                </div>
+              )}
+            </div>
+            {maxWithdraw.limitedByDebt && (
+              <div className="mb-4 flex items-start gap-2 p-3 rounded-xl text-xs bg-yellow-500/10 border border-yellow-500/20 text-yellow-400">
+                <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  You have open borrows. MAX is capped so health factor stays ≥ 1.0.
+                  Supplied {withdrawModal.userSupplyFormatted} but only {maxWithdraw.maxAmount}{" "}
+                  {withdrawModal.token.symbol} is safe to withdraw. Repay debt to unlock the rest.
+                </span>
+              </div>
+            )}
+            {withdrawUnsafe && (
+              <div className="mb-4 flex items-center gap-2 p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/20 text-red-400">
+                <AlertTriangle size={14} />
+                This withdraw would drop health factor below 1.0 and be rejected on-chain.
+              </div>
+            )}
+            {parseFloat(maxWithdraw.maxAmount) <= 0 && totalDebtUSD > 0 && (
+              <div className="mb-4 flex items-start gap-2 p-3 rounded-xl text-xs bg-red-500/10 border border-red-500/20 text-red-400">
+                <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+                <span>
+                  No safe withdraw amount while debt is ${totalDebtUSD.toFixed(4)}.
+                  Repay first, then withdraw collateral.
+                </span>
+              </div>
+            )}
             <button
               onClick={handleWithdrawSubmit}
-              disabled={!withdrawAmount || parseFloat(withdrawAmount) === 0 || submitting}
+              disabled={
+                !withdrawAmount ||
+                parseFloat(withdrawAmount) === 0 ||
+                submitting ||
+                withdrawUnsafe ||
+                parseFloat(maxWithdraw.maxAmount) <= 0
+              }
               className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-[#2a2a3a] disabled:text-gray-500 text-white font-semibold transition-colors min-h-[52px] flex items-center justify-center gap-2"
             >
               {submitting ? (
@@ -426,6 +548,10 @@ export default function LendPage() {
                   <Loader2 size={18} className="animate-spin" />
                   <span>{statusMessage || "Withdrawing..."}</span>
                 </>
+              ) : withdrawUnsafe ? (
+                "Would liquidate position"
+              ) : parseFloat(maxWithdraw.maxAmount) <= 0 && totalDebtUSD > 0 ? (
+                "Repay debt to withdraw"
               ) : (
                 `Withdraw ${withdrawModal.token.symbol}`
               )}
