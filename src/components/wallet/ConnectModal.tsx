@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useConnect, useDisconnect, useAccount } from "wagmi";
+import { useConnect } from "wagmi";
 import { X, Wallet, AlertCircle, Link } from "lucide-react";
 
 interface ConnectModalProps {
@@ -51,12 +51,21 @@ function WalletLogo({ id, name }: { id: string; name: string }) {
   return <Link size={20} className="text-gray-400" />;
 }
 
+/** Hide Phantom (and any other wallets we do not support on Arc Testnet). */
+function isHiddenConnector(connector: { id: string; name: string; type?: string }): boolean {
+  const id = connector.id.toLowerCase();
+  const name = connector.name.toLowerCase();
+  // EIP-6963 rdns / ids for Phantom: app.phantom, io.phantom, phantom
+  if (name.includes("phantom") || id.includes("phantom")) return true;
+  return false;
+}
+
 export function ConnectModal({ isOpen, onClose }: ConnectModalProps) {
   const { connect, connectors, isPending, error } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { isConnected } = useAccount();
 
   if (!isOpen) return null;
+
+  const visibleConnectors = connectors.filter((c) => !isHiddenConnector(c));
 
   const handleConnect = (connector: (typeof connectors)[0]) => {
     connect({ connector }, { onSuccess: () => onClose() });
@@ -93,7 +102,7 @@ export function ConnectModal({ isOpen, onClose }: ConnectModalProps) {
         </p>
 
         <div className="space-y-3">
-          {connectors.map((connector) => (
+          {visibleConnectors.map((connector) => (
             <button
               key={connector.uid}
               onClick={() => handleConnect(connector)}
@@ -108,7 +117,9 @@ export function ConnectModal({ isOpen, onClose }: ConnectModalProps) {
                   {connectorLabels[connector.id] || connector.name}
                 </div>
                 <div className="text-gray-500 text-xs">
-                  {connector.id === "injected" ? "Browser Extension" : "Mobile & Desktop"}
+                  {connector.id === "injected" || connector.id === "metaMask" || connector.type === "injected"
+                    ? "Browser Extension"
+                    : "Mobile & Desktop"}
                 </div>
               </div>
               {isPending && (
