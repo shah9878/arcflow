@@ -36,16 +36,17 @@ export const ORACLE_PRICES = {
 } as const;
 
 // ─── Paste deployed addresses ───────────────────────────────────────────────
+// Deployed 2026-08-09 to Arc Testnet (see arcflow-contracts/deployments/arcTestnet.json)
 export const SWAP_ROUTER_ADDRESS =
-  "0xc170E80c281f53446429e9dE2b33BFEcFdaaDd5B" as `0x${string}`;
+  "0x99e88B979f028D0ac63165AA2FFb9a22539309E7" as `0x${string}`;
 
 /** ArcFlowLendingPool — must have contract code on Arc testnet */
 export const LENDING_POOL_ADDRESS =
-  "0x20262821B19ADf7BC1f61bEd48f5D254898E42B4" as `0x${string}`;
+  "0xe9886fE76d194CE2cD6d9b6EB8733Ec53536c45d" as `0x${string}`;
 
 /** ArcFlowPriceOracle */
 export const PRICE_ORACLE_ADDRESS =
-  "0x04e345dA16D53933874038bEF497700511F98123" as `0x${string}`;
+  "0xe92f8256EF01D6fC82053017184Df164E9094141" as `0x${string}`;
 
 // ─── Arc native USDC (ERC-20 interface) ─────────────────────────────────────
 export const ARC_USDC_ADDRESS =
