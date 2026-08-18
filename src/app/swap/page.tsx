@@ -9,7 +9,7 @@ import {
 import { TokenLogo } from "@/components/ui/TokenLogo";
 import { ConnectModal } from "@/components/wallet/ConnectModal";
 import { SWAPPABLE_TOKENS, Token } from "@/lib/tokenList";
-import { useSwapQuote } from "@/hooks/useSwapQuote";
+import { swapRouteLabel, useSwapQuote } from "@/hooks/useSwapQuote";
 import { useArcNetwork } from "@/hooks/useArcNetwork";
 import { DEFAULT_SLIPPAGE, ARC_EXPLORER } from "@/lib/constants";
 import { useTxStore } from "@/lib/txStore";
@@ -92,9 +92,9 @@ export default function SwapPage() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
 
-  // Arc AppKit estimateSwap — uses token symbols
-  const { amountOut, priceImpact, minimumReceived, gasFee, loading: quoteLoading, error: quoteError } =
-    useSwapQuote(tokenIn.appKitSymbol, tokenOut?.appKitSymbol, amountIn, slippage, address);
+  // AppKit and DEX Router quotes race in parallel; AppKit wins when both succeed.
+  const { amountOut, priceImpact, minimumReceived, gasFee, loading: quoteLoading, error: quoteError, source: quoteSource } =
+    useSwapQuote(tokenIn.symbol, tokenOut?.symbol, amountIn, slippage, address);
 
   const filteredTokens = useMemo(
     () =>
@@ -139,20 +139,30 @@ export default function SwapPage() {
   };
 
   const handleSwap = async () => {
-    if (!tokenOut || !tokenIn.appKitSymbol || !tokenOut.appKitSymbol) return;
+    if (!tokenOut) return;
     setConfirmOpen(false);
-    showToast({ type: "pending", message: "Swap pending via Arc AppKit..." });
+    showToast({
+      type: "pending",
+      message: `Swap pending via ${swapRouteLabel(quoteSource)}...`,
+    });
     try {
-      const hash = await swap(
-        tokenIn.appKitSymbol,
-        tokenOut.appKitSymbol,
+      const hash = await swap({
+        tokenIn,
+        tokenOut,
         amountIn,
-        tokenIn.decimals,
-        tokenOut.decimals,
-        tokenIn.symbol,
         slippage,
-        deadline
-      );
+        deadlineMinutes: deadline,
+        preferredRoute: quoteSource,
+        onStatus: (status) => {
+          if (status === "appkit") {
+            showToast({ type: "pending", message: "Swap pending via Arc AppKit..." });
+          } else if (status === "dex-router") {
+            showToast({ type: "pending", message: "AppKit unavailable — swapping via DEX Router..." });
+          } else if (status === "approving") {
+            showToast({ type: "pending", message: "Approve token spend in your wallet..." });
+          }
+        },
+      });
       showToast({
         type: "success",
         message: `Swapped ${amountIn} ${tokenIn.symbol} → ${tokenOut.symbol}!`,
@@ -186,7 +196,6 @@ export default function SwapPage() {
     if (swapLoading) return { label: "Swapping...", action: () => {}, disabled: true, variant: "gray" };
     if (!amountIn || parseFloat(amountIn) === 0) return { label: "Enter an amount", action: () => {}, disabled: true, variant: "gray" };
     if (!tokenOut) return { label: "Select a token", action: () => {}, disabled: true, variant: "gray" };
-    if (!tokenIn.appKitSymbol || !tokenOut.appKitSymbol) return { label: "Token not supported", action: () => {}, disabled: true, variant: "gray" };
     if (quoteLoading) return { label: "Fetching quote...", action: () => {}, disabled: true, variant: "gray" };
     if (quoteError || !amountOut) return { label: "No route available", action: () => {}, disabled: true, variant: "gray" };
     return { label: "Swap", action: () => setConfirmOpen(true), disabled: false, variant: "blue" };
@@ -200,11 +209,14 @@ export default function SwapPage() {
       <div className="w-full max-w-[480px]">
         <h1 className="text-2xl font-bold text-white mb-2 text-center">Swap Tokens</h1>
 
-        {/* Arc AppKit Badge */}
         <div className="flex items-center justify-center gap-2 mb-6">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium">
-            <Zap size={11} className="text-blue-400" />
-            Powered by Arc AppKit
+          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border ${
+            quoteSource === "dex-router"
+              ? "bg-amber-500/10 border-amber-500/20 text-amber-400"
+              : "bg-blue-500/10 border-blue-500/20 text-blue-400"
+          }`}>
+            <Zap size={11} />
+            {quoteSource === "dex-router" ? "Fallback: DEX Router" : "Powered by Arc AppKit"}
           </div>
         </div>
 
@@ -357,7 +369,8 @@ export default function SwapPage() {
           >
             {swapLoading ? (
               <span className="flex items-center justify-center gap-2">
-                <Loader2 size={18} className="animate-spin" /> Swapping via Arc AppKit...
+                <Loader2 size={18} className="animate-spin" />{" "}
+                {`Swapping via ${swapRouteLabel(quoteSource)}...`}
               </span>
             ) : (
               cta.label
@@ -561,10 +574,15 @@ export default function SwapPage() {
               </div>
             )}
 
-            {/* Arc AppKit info */}
-            <div className="mb-4 flex items-center gap-2 p-2.5 rounded-xl bg-blue-500/5 border border-blue-500/15 text-blue-400/80 text-xs">
+            <div className={`mb-4 flex items-center gap-2 p-2.5 rounded-xl text-xs ${
+              quoteSource === "dex-router"
+                ? "bg-amber-500/5 border border-amber-500/15 text-amber-400/80"
+                : "bg-blue-500/5 border border-blue-500/15 text-blue-400/80"
+            }`}>
               <Zap size={12} />
-              Executed via Arc AppKit — your wallet will prompt for approval
+              {quoteSource === "dex-router"
+                ? "AppKit has no route — executing via DEX Router. Your wallet will prompt to approve if needed."
+                : "Executed via Arc AppKit — your wallet will prompt for approval"}
             </div>
 
             <button

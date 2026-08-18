@@ -3,6 +3,10 @@
 import { useState, useEffect, useRef } from "react";
 import { parseUnits, formatUnits } from "viem";
 import { getTokenBySymbol } from "@/lib/tokenList";
+import { quoteDexRouter } from "@/lib/achSwap";
+import { HttpError, isAbortError, mergeAbortSignals, withRetry } from "@/lib/retry";
+
+export type SwapQuoteSource = "appkit" | "dex-router";
 
 interface SwapQuoteResult {
   amountOut: string;
@@ -11,6 +15,11 @@ interface SwapQuoteResult {
   gasFee: string;
   loading: boolean;
   error: string | null;
+  source: SwapQuoteSource | null;
+}
+
+export function swapRouteLabel(source: SwapQuoteSource | null | undefined): string {
+  return source === "dex-router" ? "DEX Router" : "Arc AppKit";
 }
 
 /**
@@ -32,13 +41,63 @@ function describeQuoteError(status: number, apiMessage?: string): string {
   return apiMessage ?? `Quote request failed (HTTP ${status})`;
 }
 
+function toQuoteResult(
+  amountOut: string,
+  minimumReceived: string,
+  source: SwapQuoteSource
+): SwapQuoteResult {
+  const amountOutNum = parseFloat(amountOut);
+  const minReceivedNum = parseFloat(minimumReceived);
+  const priceImpact =
+    amountOutNum > 0 ? Math.abs(((amountOutNum - minReceivedNum) / amountOutNum) * 100) : 0;
+  return {
+    amountOut,
+    priceImpact: parseFloat(priceImpact.toFixed(4)),
+    minimumReceived,
+    gasFee: "~0.001 USDC",
+    loading: false,
+    error: null,
+    source,
+  };
+}
+
+async function fetchAppKitQuote(
+  tokenInSymbol: string,
+  tokenOutSymbol: string,
+  amountInBaseUnits: string,
+  tokenOutDecimals: number,
+  fromAddress: string | undefined,
+  signal?: AbortSignal
+): Promise<SwapQuoteResult> {
+  const params = new URLSearchParams({
+    tokenIn: tokenInSymbol,
+    tokenOut: tokenOutSymbol,
+    amount: amountInBaseUnits,
+  });
+  if (fromAddress) params.set("fromAddress", fromAddress);
+
+  const res = await fetch(`/api/swap/quote?${params.toString()}`, {
+    cache: "no-store",
+    signal: mergeAbortSignals(signal, AbortSignal.timeout(10_000)),
+  });
+  const body = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new HttpError(describeQuoteError(res.status, body?.error), res.status);
+  }
+
+  const estimatedAmount = BigInt(body.quote.estimatedAmount);
+  const minAmount = BigInt(body.quote.minAmount);
+  return toQuoteResult(
+    parseFloat(formatUnits(estimatedAmount, tokenOutDecimals)).toFixed(4),
+    parseFloat(formatUnits(minAmount, tokenOutDecimals)).toFixed(4),
+    "appkit"
+  );
+}
+
 /**
- * Fetches swap quotes from our own /api/swap/quote route instead of calling
- * Circle's API directly from the browser. That endpoint is read-only pricing
- * with no wallet/signing involved, so proxying it server-side means browser
- * extensions or network policies that block third-party fetches to
- * api.circle.com no longer break quotes (unlike swap execution, which still
- * has to run client-side against the wallet adapter).
+ * Quotes AppKit and the DEX Router in parallel. AppKit wins when both
+ * succeed; otherwise the first healthy fallback is used.
  */
 export function useSwapQuote(
   tokenInSymbol: string | undefined,
@@ -54,9 +113,10 @@ export function useSwapQuote(
     gasFee: "",
     loading: false,
     error: null,
+    source: null,
   });
 
-  const abortRef = useRef<boolean>(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const empty: SwapQuoteResult = {
@@ -66,6 +126,7 @@ export function useSwapQuote(
       gasFee: "",
       loading: false,
       error: null,
+      source: null,
     };
 
     if (!tokenInSymbol || !tokenOutSymbol || !amountIn || parseFloat(amountIn) === 0) {
@@ -91,54 +152,69 @@ export function useSwapQuote(
       return;
     }
 
-    abortRef.current = false;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setResult((prev) => ({ ...prev, loading: true, error: null }));
 
     const fetchEstimate = async () => {
-      try {
-        const amountInBaseUnits = parseUnits(amountIn, tokenIn.decimals).toString();
-        const params = new URLSearchParams({
-          tokenIn: tokenIn.symbol,
-          tokenOut: tokenOut.symbol,
-          amount: amountInBaseUnits,
-        });
-        if (fromAddress) params.set("fromAddress", fromAddress);
+      const amountInBaseUnits = parseUnits(amountIn, tokenIn.decimals).toString();
 
-        const res = await fetch(`/api/swap/quote?${params.toString()}`);
-        const body = await res.json().catch(() => null);
+      const [appKitResult, dexResult] = await Promise.allSettled([
+        withRetry(
+          () =>
+            fetchAppKitQuote(
+              tokenIn.symbol,
+              tokenOut.symbol,
+              amountInBaseUnits,
+              tokenOut.decimals,
+              fromAddress,
+              controller.signal
+            ),
+          { retries: 1, signal: controller.signal }
+        ),
+        quoteDexRouter(tokenIn, tokenOut, amountIn, slippage, controller.signal),
+      ]);
 
-        if (abortRef.current) return;
+      if (controller.signal.aborted) return;
 
-        if (!res.ok) {
-          setResult({
-            amountOut: "",
-            priceImpact: 0,
-            minimumReceived: "",
-            gasFee: "",
-            loading: false,
-            error: describeQuoteError(res.status, body?.error),
-          });
-          return;
-        }
+      if (appKitResult.status === "fulfilled") {
+        setResult(appKitResult.value);
+        return;
+      }
 
-        const estimatedAmount = BigInt(body.quote.estimatedAmount);
-        const minAmount = BigInt(body.quote.minAmount);
+      if (dexResult.status === "fulfilled") {
+        const fallback = dexResult.value;
+        setResult(
+          toQuoteResult(fallback.amountOutFormatted, fallback.minReceivedFormatted, "dex-router")
+        );
+        return;
+      }
 
-        const amountOutNum = parseFloat(formatUnits(estimatedAmount, tokenOut.decimals));
-        const minReceivedNum = parseFloat(formatUnits(minAmount, tokenOut.decimals));
-        const priceImpact = amountOutNum > 0 ? Math.abs(((amountOutNum - minReceivedNum) / amountOutNum) * 100) : 0;
+      const appKitError = appKitResult.reason;
+      const dexError = dexResult.reason;
+      if (isAbortError(appKitError) || isAbortError(dexError)) return;
 
-        setResult({
-          amountOut: amountOutNum.toFixed(4),
-          priceImpact: parseFloat(priceImpact.toFixed(4)),
-          minimumReceived: minReceivedNum.toFixed(4),
-          gasFee: "~0.001 USDC",
-          loading: false,
-          error: null,
-        });
-      } catch (err: unknown) {
-        if (abortRef.current) return;
-        console.error("[useSwapQuote] estimate failed:", err);
+      const message =
+        (appKitError instanceof Error && appKitError.message) ||
+        (dexError instanceof Error && dexError.message) ||
+        "No swap route found for this pair";
+
+      setResult({
+        amountOut: "",
+        priceImpact: 0,
+        minimumReceived: "",
+        gasFee: "",
+        loading: false,
+        error: message,
+        source: null,
+      });
+    };
+
+    const debounceTimer = setTimeout(() => {
+      if (controller.signal.aborted) return;
+      fetchEstimate().catch((err: unknown) => {
+        if (controller.signal.aborted || isAbortError(err)) return;
         setResult({
           amountOut: "",
           priceImpact: 0,
@@ -146,17 +222,13 @@ export function useSwapQuote(
           gasFee: "",
           loading: false,
           error: err instanceof Error ? err.message : "Estimate failed",
+          source: null,
         });
-      }
-    };
-
-    const debounceTimer = setTimeout(() => {
-      if (abortRef.current) return;
-      fetchEstimate();
+      });
     }, 350);
 
     return () => {
-      abortRef.current = true;
+      controller.abort();
       clearTimeout(debounceTimer);
     };
   }, [tokenInSymbol, tokenOutSymbol, amountIn, slippage, fromAddress]);

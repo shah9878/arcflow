@@ -40,6 +40,10 @@ export const ORACLE_PRICES = {
 export const SWAP_ROUTER_ADDRESS =
   "0x99e88B979f028D0ac63165AA2FFb9a22539309E7" as `0x${string}`;
 
+/** DEX Router adapter — AppKit fallback on Arc Testnet */
+export const ACHSWAP_ADAPTER_ADDRESS =
+  "0xF82c88FbF46E109a3865647E5c4d4834b31f8AFB" as `0x${string}`;
+
 /** ArcFlowLendingPool — must have contract code on Arc testnet */
 export const LENDING_POOL_ADDRESS =
   "0xe9886fE76d194CE2cD6d9b6EB8733Ec53536c45d" as `0x${string}`;

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTokenBySymbol } from "@/lib/tokenList";
+import { HttpError, withRetry } from "@/lib/retry";
 
 const STABLECOIN_SERVICE_BASE_URL = "https://api.circle.com";
 const QUOTE_PATH = "/v1/stablecoinKits/quote";
@@ -40,10 +41,20 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("amount", amount);
 
   try {
-    const upstream = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
+    const upstream = await withRetry(
+      async () => {
+        const res = await fetch(url.toString(), {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (res.status === 429 || res.status >= 500) {
+          throw new HttpError(`AppKit quote HTTP ${res.status}`, res.status);
+        }
+        return res;
+      },
+      { retries: 2, baseDelayMs: 300 }
+    );
     const body = await upstream.json().catch(() => null);
 
     if (!upstream.ok) {

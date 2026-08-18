@@ -68,7 +68,7 @@ export default function HomePage() {
               <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
             </Link>
             <a
-              href="https://testnet.arcscan.app"
+              href="https://docs.arc.io/"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl border border-[#2a2a3a] text-gray-300 hover:text-white hover:border-gray-500 font-medium text-base transition-all duration-200 min-h-[52px]"
